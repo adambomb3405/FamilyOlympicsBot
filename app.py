@@ -24,7 +24,7 @@ VALID_FAMILIES = [
     "Bender",
     "Varsity",
     "Top Dawg",
-    "Royal-T"
+    "Royal-T",
 ]
 
 
@@ -283,20 +283,20 @@ def cmd_setfam(sh, args, sender_name, sender_id):
 HELP_TEXT = """🏅 Olympics Bot Help
 
 📸 Submit a photo:
-  Type @OlympicsBot with an image attached
-  (type the name manually — don't use the mention picker)
+  /submit (with image attached)
 
 📊 Commands (anyone):
-  @OlympicsBot scores
-  @OlympicsBot families
-  @OlympicsBot dispute [name]
+  /scores
+  /families
+  /setfam [family]
+  /dispute [name]
 
 🔒 Admin only:
-  @OlympicsBot assign [name] [family]
-  @OlympicsBot unassign [name]
-  @OlympicsBot approve [name]
-  @OlympicsBot reject [name]
-  @OlympicsBot addpoints [family] [N]"""
+  /assign [name] [family]
+  /unassign [name]
+  /approve [name]
+  /reject [name]
+  /addpoints [family] [N]"""
 
 
 # ── Debug endpoints ───────────────────────────────────────────────────────────
@@ -329,24 +329,30 @@ def webhook():
     has_image = any(a.get("type") == "image" for a in attachments)
     image_url = next((a["url"] for a in attachments if a.get("type") == "image"), "")
 
-    # Only respond when the bot name is in the message
-    if bot_tag not in text.lower():
+    # Respond to /command prefix OR @BotName
+    is_slash = text.startswith("/")
+    is_tagged = bot_tag in text.lower()
+
+    if not is_slash and not is_tagged:
         return jsonify({}), 200
 
-    is_admin  = sender_id == cfg("ADMIN_USER_ID")
+    is_admin = sender_id == cfg("ADMIN_USER_ID")
 
-    # Parse everything after the bot name as "cmd args"
-    lower     = text.lower()
-    after_tag = text[lower.index(bot_tag) + len(bot_tag):].strip()
-    tokens    = after_tag.split()
-    cmd       = tokens[0].lower() if tokens else ""
-    args      = tokens[1:]
+    if is_slash:
+        tokens = text[1:].split()
+    else:
+        lower = text.lower()
+        after_tag = text[lower.index(bot_tag) + len(bot_tag):].strip()
+        tokens = after_tag.split()
+
+    cmd  = tokens[0].lower() if tokens else ""
+    args = tokens[1:]
 
     COMMANDS = {"scores", "families", "assign", "unassign", "dispute",
-                "approve", "reject", "addpoints", "setfam", "help"}
+                "approve", "reject", "addpoints", "setfam", "help", "submit"}
 
     # ── Photo submission ──────────────────────────────────────────────────────
-    if has_image and cmd not in COMMANDS:
+    if has_image and (cmd == "submit" or cmd not in COMMANDS):
         sh         = get_sheets()
         ws_members = get_ws(sh, "members")
         ws_points  = get_ws(sh, "points")
