@@ -20,10 +20,11 @@ def cfg(key, default=None):
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 VALID_FAMILIES = [
-    "Family1",
-    "Family2",
-    "Family3",
-    # add more here
+    "La Familia",
+    "Bender",
+    "Varsity",
+    "Top Dawg",
+    "Royal-T"
 ]
 
 
