@@ -17,7 +17,12 @@ def cfg(key, default=None):
         raise RuntimeError(f"Missing required environment variable: {key}")
     return val
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+VALID_FAMILIES = [
+    "Family1",
+    "Family2",
+    "Family3",
+    # add more here
+]
 
 
 # ── Google Sheets connection ─────────────────────────────────────────────────
@@ -230,7 +235,26 @@ def cmd_reject(sh, args, is_admin):
     return f"❌ {name}'s submission rejected. Point removed from {record['family']}."
 
 
-def cmd_addpoints(sh, args, is_admin):
+def cmd_setfam(sh, args, sender_name, sender_id):
+    if not args:
+        families_list = ", ".join(VALID_FAMILIES)
+        return f"Usage: @OlympicsBot setfam [family]\nFamilies: {families_list}"
+    family = " ".join(args)
+    match = next((f for f in VALID_FAMILIES if f.lower() == family.lower()), None)
+    if not match:
+        families_list = ", ".join(VALID_FAMILIES)
+        return f"❌ '{family}' is not a valid family.\nChoose from: {families_list}"
+    ws = get_ws(sh, "members")
+    existing = find_member_by_name(ws, sender_name)
+    if existing:
+        idx, _ = existing
+        ws.update_cell(idx, 3, match)
+    else:
+        ws.append_row([sender_name, sender_id, match])
+    return f"✅ {sender_name} joined {match}!"
+
+
+
     """Admin manual point adjustment: addpoints [family] [+/-N]"""
     if not is_admin:
         return "❌ Admin only."
@@ -316,7 +340,7 @@ def webhook():
     args      = tokens[1:]
 
     COMMANDS = {"scores", "families", "assign", "unassign", "dispute",
-                "approve", "reject", "addpoints", "help"}
+                "approve", "reject", "addpoints", "setfam", "help"}
 
     # ── Photo submission ──────────────────────────────────────────────────────
     if has_image and cmd not in COMMANDS:
@@ -361,6 +385,8 @@ def webhook():
         send_message(cmd_approve(sh, args, is_admin))
     elif cmd == "reject":
         send_message(cmd_reject(sh, args, is_admin))
+    elif cmd == "setfam":
+        send_message(cmd_setfam(sh, args, sender_name, sender_id))
     elif cmd == "addpoints":
         send_message(cmd_addpoints(sh, args, is_admin))
     else:
@@ -372,5 +398,3 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
-#
