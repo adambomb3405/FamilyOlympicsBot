@@ -256,27 +256,38 @@ def cmd_addpoints(sh, args, is_admin):
 HELP_TEXT = """🏅 Olympics Bot Help
 
 📸 Submit a photo:
-  Send an image with the word "submit"
-  Example: "submit" [photo attached]
+  Type @OlympicsBot with an image attached
+  (type the name manually — don't use the mention picker)
 
 📊 Commands (anyone):
-  !scores      — leaderboard
-  !families    — roster by family
-  !dispute [name] — flag a bad photo
-  !help        — this message
+  @OlympicsBot scores
+  @OlympicsBot families
+  @OlympicsBot dispute [name]
 
 🔒 Admin only:
-  !assign [name] [family]
-  !unassign [name]
-  !approve [name]
-  !reject [name]
-  !addpoints [family] [N]"""
+  @OlympicsBot assign [name] [family]
+  @OlympicsBot unassign [name]
+  @OlympicsBot approve [name]
+  @OlympicsBot reject [name]
+  @OlympicsBot addpoints [family] [N]"""
+
+
+# ── Debug endpoints ───────────────────────────────────────────────────────────
+@app.route("/ping", methods=["GET"])
+def ping():
+    return "Bot is running.", 200
 
 
 # ── Webhook entry point ───────────────────────────────────────────────────────
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(silent=True) or {}
+
+    # Log every incoming payload for debugging
+    logging.info(f"WEBHOOK RECEIVED: sender={data.get('name')} "
+                 f"type={data.get('sender_type')} "
+                 f"text={repr(data.get('text'))} "
+                 f"attachments={data.get('attachments')}")
 
     # Ignore bot messages to prevent infinite loops
     if data.get("sender_type") == "bot":
