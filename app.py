@@ -36,6 +36,12 @@ FAMILY_ALIASES = {
 }
 
 
+def resolve_family(name):
+    """Resolve a family name or abbreviation to the canonical name, or None if invalid."""
+    key = name.lower().strip()
+    return FAMILY_ALIASES.get(key) or next((f for f in VALID_FAMILIES if f.lower() == key), None)
+
+
 # ── Google Sheets connection ──────────────────────────────────────────────────
 def get_sheets():
     creds_dict = json.loads(cfg("GOOGLE_SERVICE_ACCOUNT_JSON"))
@@ -165,8 +171,7 @@ def cmd_setfam(sh, args, sender_name, sender_id):
         families_list = ", ".join(VALID_FAMILIES)
         return f"Usage: /setfam [family]\nFamilies: {families_list}\nAbbreviations: LF, B, V, TD, RT"
     family = " ".join(args)
-    key = family.lower()
-    match = FAMILY_ALIASES.get(key) or next((f for f in VALID_FAMILIES if f.lower() == key), None)
+    match = resolve_family(family)
     if not match:
         families_list = ", ".join(VALID_FAMILIES)
         return f"❌ '{family}' is not a valid family.\nChoose from: {families_list}\nAbbreviations: LF, B, V, TD, RT"
@@ -184,7 +189,8 @@ def cmd_assign(sh, args, is_admin):
         return "❌ Admin only."
     if len(args) < 2:
         return "Usage: /assign [display name] [family]"
-    family = args[-1]
+    family_input = args[-1]
+    family = resolve_family(family_input) or family_input
     name = " ".join(args[:-1])
     ws = get_ws(sh, "members")
     existing = find_member_by_name(ws, name)
@@ -263,7 +269,8 @@ def cmd_addpoints(sh, args, is_admin):
         delta = int(args[-1])
     except ValueError:
         return "❌ Last argument must be a number."
-    family = " ".join(args[:-1])
+    family_input = " ".join(args[:-1])
+    family = resolve_family(family_input) or family_input
     ws_points = get_ws(sh, "points")
     result = get_family_row(ws_points, family)
     if result:
