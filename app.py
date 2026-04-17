@@ -17,12 +17,12 @@ def cfg(key, default=None):
         raise RuntimeError(f"Missing required environment variable: {key}")
     return val
 
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
 VALID_FAMILIES = [
-    "La Familia",
-    "Bender",
-    "Varsity",
-    "Top Dawg",
-    "Royal-T"
+    "Family1",
+    "Family2",
+    "Family3",
     # add more here
 ]
 
