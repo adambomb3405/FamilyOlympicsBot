@@ -287,12 +287,28 @@ def webhook():
     sender_id   = str(data.get("user_id", ""))
     attachments = data.get("attachments", [])
 
-    has_image  = any(a.get("type") == "image" for a in attachments)
-    image_url  = next((a["url"] for a in attachments if a.get("type") == "image"), "")
-    text_lower = text.lower()
+    bot_tag   = f"@{cfg('BOT_NAME', 'OlympicsBot')}".lower()
+    has_image = any(a.get("type") == "image" for a in attachments)
+    image_url = next((a["url"] for a in attachments if a.get("type") == "image"), "")
 
-    # ── Photo submission: image + word "submit" anywhere in message ───────────
-    if has_image and "submit" in text_lower:
+    # Only respond when the bot name is in the message
+    if bot_tag not in text.lower():
+        return jsonify({}), 200
+
+    is_admin  = sender_id == cfg("ADMIN_USER_ID")
+
+    # Parse everything after the bot name as "cmd args"
+    lower     = text.lower()
+    after_tag = text[lower.index(bot_tag) + len(bot_tag):].strip()
+    tokens    = after_tag.split()
+    cmd       = tokens[0].lower() if tokens else ""
+    args      = tokens[1:]
+
+    COMMANDS = {"scores", "families", "assign", "unassign", "dispute",
+                "approve", "reject", "addpoints", "help"}
+
+    # ── Photo submission ──────────────────────────────────────────────────────
+    if has_image and cmd not in COMMANDS:
         sh         = get_sheets()
         ws_members = get_ws(sh, "members")
         ws_points  = get_ws(sh, "points")
@@ -307,7 +323,7 @@ def webhook():
         if not member:
             send_message(
                 f"❌ {sender_name}, you're not on the roster yet.\n"
-                f"Admin: use '!assign {sender_name} [FamilyName]'"
+                f"Admin: use '@OlympicsBot assign {sender_name} [FamilyName]'"
             )
             return jsonify({}), 200
 
@@ -317,15 +333,8 @@ def webhook():
         send_message(f"✅ Point recorded for {sender_name}! ({family})")
         return jsonify({}), 200
 
-    # ── ! prefix commands ─────────────────────────────────────────────────────
-    if not text.startswith("!"):
-        return jsonify({}), 200
-
-    is_admin = sender_id == cfg("ADMIN_USER_ID")
-    tokens   = text[1:].split()
-    cmd      = tokens[0].lower() if tokens else ""
-    args     = tokens[1:]
-    sh       = get_sheets()
+    # ── Text commands ─────────────────────────────────────────────────────────
+    sh = get_sheets()
 
     if cmd == "scores":
         send_message(cmd_scores(sh))
@@ -343,7 +352,7 @@ def webhook():
         send_message(cmd_reject(sh, args, is_admin))
     elif cmd == "addpoints":
         send_message(cmd_addpoints(sh, args, is_admin))
-    elif cmd == "help":
+    else:
         send_message(HELP_TEXT)
 
     return jsonify({}), 200
