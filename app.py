@@ -18,9 +18,11 @@ def cfg(key, default=None):
     return val
 
 VALID_FAMILIES = [
-    "Family1",
-    "Family2",
-    "Family3",
+    "La Familia",
+    "Bender",
+    "Varsity",
+    "Top Dawg",
+    "Royal-T"
     # add more here
 ]
 
