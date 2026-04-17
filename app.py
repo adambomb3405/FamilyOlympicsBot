@@ -17,7 +17,15 @@ def cfg(key, default=None):
         raise RuntimeError(f"Missing required environment variable: {key}")
     return val
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+FAMILY_ALIASES = {
+    "lf": "La Familia",
+    "b": "Bender",
+    "v": "Varsity",
+    "td": "Top Dawg",
+    "rt": "Royal-T",
+}
+
+
 
 VALID_FAMILIES = [
     "La Familia",
@@ -243,7 +251,8 @@ def cmd_setfam(sh, args, sender_name, sender_id):
         families_list = ", ".join(VALID_FAMILIES)
         return f"Usage: @OlympicsBot setfam [family]\nFamilies: {families_list}"
     family = " ".join(args)
-    match = next((f for f in VALID_FAMILIES if f.lower() == family.lower()), None)
+    key = family.lower()
+    match = FAMILY_ALIASES.get(key) or next((f for f in VALID_FAMILIES if f.lower() == key), None)
     if not match:
         families_list = ", ".join(VALID_FAMILIES)
         return f"❌ '{family}' is not a valid family.\nChoose from: {families_list}"
