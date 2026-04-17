@@ -256,19 +256,21 @@ def cmd_addpoints(sh, args, is_admin):
 HELP_TEXT = """🏅 Olympics Bot Help
 
 📸 Submit a photo:
-  Tag me with an image attached
+  Send an image with the word "submit"
+  Example: "submit" [photo attached]
 
 📊 Commands (anyone):
-  @bot scores      — leaderboard
-  @bot families    — roster by family
-  @bot dispute [name] — flag a bad photo
+  !scores      — leaderboard
+  !families    — roster by family
+  !dispute [name] — flag a bad photo
+  !help        — this message
 
 🔒 Admin only:
-  @bot assign [name] [family]
-  @bot unassign [name]
-  @bot approve [name]
-  @bot reject [name]
-  @bot addpoints [family] [N]"""
+  !assign [name] [family]
+  !unassign [name]
+  !approve [name]
+  !reject [name]
+  !addpoints [family] [N]"""
 
 
 # ── Webhook entry point ───────────────────────────────────────────────────────
@@ -285,45 +287,27 @@ def webhook():
     sender_id   = str(data.get("user_id", ""))
     attachments = data.get("attachments", [])
 
-    # Only respond when the bot is tagged
-    bot_tag = f"@{cfg('BOT_NAME', 'OlympicsBot')}".lower()
-    if bot_tag not in text.lower():
-        return jsonify({}), 200
+    has_image  = any(a.get("type") == "image" for a in attachments)
+    image_url  = next((a["url"] for a in attachments if a.get("type") == "image"), "")
+    text_lower = text.lower()
 
-    is_admin  = sender_id == cfg("ADMIN_USER_ID")
-    has_image = any(a.get("type") == "image" for a in attachments)
-    image_url = next((a["url"] for a in attachments if a.get("type") == "image"), "")
-
-    # Parse command token and args from text after the bot tag
-    lower     = text.lower()
-    after_tag = text[lower.index(bot_tag) + len(bot_tag):].strip()
-    tokens    = after_tag.split()
-    cmd       = tokens[0].lower() if tokens else ""
-    args      = tokens[1:]
-
-    # Known non-submission commands (won't be treated as photo submissions)
-    COMMANDS = {"scores", "families", "assign", "unassign", "dispute",
-                "approve", "reject", "addpoints", "help"}
-
-    # ── Photo submission ──────────────────────────────────────────────────────
-    if has_image and cmd not in COMMANDS:
-        sh = get_sheets()
+    # ── Photo submission: image + word "submit" anywhere in message ───────────
+    if has_image and "submit" in text_lower:
+        sh         = get_sheets()
         ws_members = get_ws(sh, "members")
         ws_points  = get_ws(sh, "points")
         ws_log     = get_ws(sh, "log")
 
-        # Look up member: try user_id first, fall back to display name
         member = find_member_by_id(ws_members, sender_id)
         if not member:
             member = find_member_by_name(ws_members, sender_name)
             if member:
-                # Auto-fill their user_id now that we know it
                 ws_members.update_cell(member[0], 2, sender_id)
 
         if not member:
             send_message(
                 f"❌ {sender_name}, you're not on the roster yet.\n"
-                f"Ask an admin: @bot assign {sender_name} [FamilyName]"
+                f"Admin: use '!assign {sender_name} [FamilyName]'"
             )
             return jsonify({}), 200
 
@@ -333,8 +317,15 @@ def webhook():
         send_message(f"✅ Point recorded for {sender_name}! ({family})")
         return jsonify({}), 200
 
-    # ── Text commands ─────────────────────────────────────────────────────────
-    sh = get_sheets()
+    # ── ! prefix commands ─────────────────────────────────────────────────────
+    if not text.startswith("!"):
+        return jsonify({}), 200
+
+    is_admin = sender_id == cfg("ADMIN_USER_ID")
+    tokens   = text[1:].split()
+    cmd      = tokens[0].lower() if tokens else ""
+    args     = tokens[1:]
+    sh       = get_sheets()
 
     if cmd == "scores":
         send_message(cmd_scores(sh))
@@ -352,7 +343,7 @@ def webhook():
         send_message(cmd_reject(sh, args, is_admin))
     elif cmd == "addpoints":
         send_message(cmd_addpoints(sh, args, is_admin))
-    else:
+    elif cmd == "help":
         send_message(HELP_TEXT)
 
     return jsonify({}), 200
