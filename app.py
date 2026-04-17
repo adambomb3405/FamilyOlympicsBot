@@ -10,22 +10,22 @@ from google.oauth2.service_account import Credentials
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# ── Config (set these as environment variables) ──────────────────────────────
-BOT_ID = os.environ["GROUPME_BOT_ID"]
-BOT_NAME = os.environ.get("BOT_NAME", "OlympicsBot")  # must match bot's display name exactly
-ADMIN_USER_ID = os.environ["ADMIN_USER_ID"]            # your GroupMe user_id
-SHEET_ID = os.environ["GOOGLE_SHEET_ID"]               # from the sheet URL
-SERVICE_ACCOUNT_JSON = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]  # full JSON string
+# ── Config — read at request time so missing vars don't crash startup ────────
+def cfg(key, default=None):
+    val = os.environ.get(key, default)
+    if val is None:
+        raise RuntimeError(f"Missing required environment variable: {key}")
+    return val
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 
 # ── Google Sheets connection ─────────────────────────────────────────────────
 def get_sheets():
-    creds_dict = json.loads(SERVICE_ACCOUNT_JSON)
+    creds_dict = json.loads(cfg("GOOGLE_SERVICE_ACCOUNT_JSON"))
     creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     gc = gspread.authorize(creds)
-    return gc.open_by_key(SHEET_ID)
+    return gc.open_by_key(cfg("GOOGLE_SHEET_ID"))
 
 
 def get_ws(sh, name):
@@ -110,7 +110,7 @@ def send_message(text):
     try:
         requests.post(
             "https://api.groupme.com/v3/bots/post",
-            json={"bot_id": BOT_ID, "text": text},
+            json={"bot_id": cfg("GROUPME_BOT_ID"), "text": text},
             timeout=5,
         )
     except Exception as e:
@@ -286,11 +286,11 @@ def webhook():
     attachments = data.get("attachments", [])
 
     # Only respond when the bot is tagged
-    bot_tag = f"@{BOT_NAME}".lower()
+    bot_tag = f"@{cfg('BOT_NAME', 'OlympicsBot')}".lower()
     if bot_tag not in text.lower():
         return jsonify({}), 200
 
-    is_admin  = sender_id == ADMIN_USER_ID
+    is_admin  = sender_id == cfg("ADMIN_USER_ID")
     has_image = any(a.get("type") == "image" for a in attachments)
     image_url = next((a["url"] for a in attachments if a.get("type") == "image"), "")
 
