@@ -10,22 +10,14 @@ from google.oauth2.service_account import Credentials
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# ── Config — read at request time so missing vars don't crash startup ────────
+# ── Config ───────────────────────────────────────────────────────────────────
 def cfg(key, default=None):
     val = os.environ.get(key, default)
     if val is None:
         raise RuntimeError(f"Missing required environment variable: {key}")
     return val
 
-FAMILY_ALIASES = {
-    "lf": "La Familia",
-    "b": "Bender",
-    "v": "Varsity",
-    "td": "Top Dawg",
-    "rt": "Royal-T",
-}
-
-
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 VALID_FAMILIES = [
     "La Familia",
@@ -35,8 +27,16 @@ VALID_FAMILIES = [
     "Royal-T",
 ]
 
+FAMILY_ALIASES = {
+    "lf": "La Familia",
+    "b":  "Bender",
+    "v":  "Varsity",
+    "td": "Top Dawg",
+    "rt": "Royal-T",
+}
 
-# ── Google Sheets connection ─────────────────────────────────────────────────
+
+# ── Google Sheets connection ──────────────────────────────────────────────────
 def get_sheets():
     creds_dict = json.loads(cfg("GOOGLE_SERVICE_ACCOUNT_JSON"))
     creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
@@ -45,7 +45,6 @@ def get_sheets():
 
 
 def get_ws(sh, name):
-    """Get a worksheet by name, creating it with headers if it doesn't exist."""
     try:
         return sh.worksheet(name)
     except gspread.WorksheetNotFound:
@@ -60,9 +59,8 @@ def get_ws(sh, name):
         return ws
 
 
-# ── Members sheet helpers ─────────────────────────────────────────────────────
+# ── Members helpers ───────────────────────────────────────────────────────────
 def find_member_by_id(ws, user_id):
-    """Return (row_index, record) by GroupMe user_id, or None."""
     for i, r in enumerate(ws.get_all_records(), start=2):
         if str(r["user_id"]) == str(user_id):
             return i, r
@@ -70,7 +68,6 @@ def find_member_by_id(ws, user_id):
 
 
 def find_member_by_name(ws, name):
-    """Return (row_index, record) by display_name (case-insensitive), or None."""
     target = name.lower().strip()
     for i, r in enumerate(ws.get_all_records(), start=2):
         if r["display_name"].lower().strip() == target:
@@ -78,9 +75,8 @@ def find_member_by_name(ws, name):
     return None
 
 
-# ── Points sheet helpers ──────────────────────────────────────────────────────
+# ── Points helpers ────────────────────────────────────────────────────────────
 def get_family_row(ws_points, family):
-    """Return (row_index, points) for a family, or None."""
     for i, r in enumerate(ws_points.get_all_records(), start=2):
         if r["family"].lower() == family.lower():
             return i, int(r["points"])
@@ -103,7 +99,7 @@ def remove_point(ws_points, family):
         ws_points.update_cell(idx, 2, max(0, pts - 1))
 
 
-# ── Log sheet helpers ─────────────────────────────────────────────────────────
+# ── Log helpers ───────────────────────────────────────────────────────────────
 def log_submission(ws_log, name, family, image_url, status="approved"):
     ws_log.append_row([
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -112,12 +108,11 @@ def log_submission(ws_log, name, family, image_url, status="approved"):
 
 
 def find_latest_by_status(ws_log, name, status):
-    """Find the most recent log row for a name with the given status."""
     records = ws_log.get_all_records()
     for i in range(len(records) - 1, -1, -1):
         r = records[i]
         if r["display_name"].lower() == name.lower() and r["status"] == status:
-            return i + 2, r  # +2: header row + 0-index offset
+            return i + 2, r
     return None
 
 
@@ -138,7 +133,7 @@ def cmd_scores(sh):
     ws = get_ws(sh, "points")
     records = ws.get_all_records()
     if not records:
-        return "No scores yet! Submit a photo to get on the board."
+        return "No scores yet! Use /submit with a photo to get on the board."
     ranked = sorted(records, key=lambda r: int(r["points"]), reverse=True)
     medals = ["🥇", "🥈", "🥉"]
     lines = ["🏅 Family Olympics Standings\n"]
@@ -152,7 +147,7 @@ def cmd_families(sh):
     ws = get_ws(sh, "members")
     records = ws.get_all_records()
     if not records:
-        return "No families assigned yet. Admin: use 'assign [name] [family]'."
+        return "No families assigned yet. Use /setfam [family] to join one."
     by_family = {}
     for r in records:
         by_family.setdefault(r["family"], []).append(r["display_name"])
@@ -165,44 +160,58 @@ def cmd_families(sh):
     return "\n".join(lines).strip()
 
 
+def cmd_setfam(sh, args, sender_name, sender_id):
+    if not args:
+        families_list = ", ".join(VALID_FAMILIES)
+        return f"Usage: /setfam [family]\nFamilies: {families_list}\nAbbreviations: LF, B, V, TD, RT"
+    family = " ".join(args)
+    key = family.lower()
+    match = FAMILY_ALIASES.get(key) or next((f for f in VALID_FAMILIES if f.lower() == key), None)
+    if not match:
+        families_list = ", ".join(VALID_FAMILIES)
+        return f"❌ '{family}' is not a valid family.\nChoose from: {families_list}\nAbbreviations: LF, B, V, TD, RT"
+    ws = get_ws(sh, "members")
+    existing = find_member_by_name(ws, sender_name)
+    if existing:
+        ws.update_cell(existing[0], 3, match)
+    else:
+        ws.append_row([sender_name, sender_id, match])
+    return f"✅ {sender_name} joined {match}!"
+
+
 def cmd_assign(sh, args, is_admin):
-    """assign [display name] [family]  — family is last token, name is everything before."""
     if not is_admin:
         return "❌ Admin only."
     if len(args) < 2:
-        return "Usage: @bot assign [display name] [family]\nExample: @bot assign John Smith TeamAlpha"
+        return "Usage: /assign [display name] [family]"
     family = args[-1]
     name = " ".join(args[:-1])
     ws = get_ws(sh, "members")
     existing = find_member_by_name(ws, name)
     if existing:
-        idx, _ = existing
-        ws.update_cell(idx, 3, family)
+        ws.update_cell(existing[0], 3, family)
         return f"✅ Updated {name} → {family}"
-    else:
-        ws.append_row([name, "", family])
-        return (f"✅ Assigned {name} → {family}\n"
-                f"Their user ID will be auto-filled when they submit a photo.")
+    ws.append_row([name, "", family])
+    return f"✅ Assigned {name} → {family}"
 
 
 def cmd_unassign(sh, args, is_admin):
     if not is_admin:
         return "❌ Admin only."
     if not args:
-        return "Usage: @bot unassign [display name]"
+        return "Usage: /unassign [display name]"
     name = " ".join(args)
     ws = get_ws(sh, "members")
     result = find_member_by_name(ws, name)
     if not result:
-        return f"❌ {name} not found on the roster."
+        return f"❌ {name} not found."
     ws.delete_rows(result[0])
     return f"✅ Removed {name} from the roster."
 
 
 def cmd_dispute(sh, args, sender_name):
-    """Anyone can dispute a submission. Flags it for admin review."""
     if not args:
-        return "Usage: @bot dispute [display name]\nExample: @bot dispute John Smith"
+        return "Usage: /dispute [display name]"
     name = " ".join(args)
     ws_log = get_ws(sh, "log")
     result = find_latest_by_status(ws_log, name, "approved")
@@ -211,14 +220,14 @@ def cmd_dispute(sh, args, sender_name):
     idx, record = result
     ws_log.update_cell(idx, 5, "disputed")
     return (f"🚩 {sender_name} disputed {name}'s last submission ({record['timestamp']}).\n"
-            f"Admin: '@bot approve {name}' to keep the point or '@bot reject {name}' to remove it.")
+            f"Admin: /approve {name} or /reject {name}")
 
 
 def cmd_approve(sh, args, is_admin):
     if not is_admin:
         return "❌ Admin only."
     if not args:
-        return "Usage: @bot approve [display name]"
+        return "Usage: /approve [display name]"
     name = " ".join(args)
     ws_log = get_ws(sh, "log")
     result = find_latest_by_status(ws_log, name, "disputed")
@@ -232,11 +241,10 @@ def cmd_reject(sh, args, is_admin):
     if not is_admin:
         return "❌ Admin only."
     if not args:
-        return "Usage: @bot reject [display name]"
+        return "Usage: /reject [display name]"
     name = " ".join(args)
-    sh2 = sh  # same connection
-    ws_log = get_ws(sh2, "log")
-    ws_points = get_ws(sh2, "points")
+    ws_log = get_ws(sh, "log")
+    ws_points = get_ws(sh, "points")
     result = find_latest_by_status(ws_log, name, "disputed")
     if not result:
         return f"❌ No disputed submission found for {name}."
@@ -246,32 +254,11 @@ def cmd_reject(sh, args, is_admin):
     return f"❌ {name}'s submission rejected. Point removed from {record['family']}."
 
 
-def cmd_setfam(sh, args, sender_name, sender_id):
-    if not args:
-        families_list = ", ".join(VALID_FAMILIES)
-        return f"Usage: @OlympicsBot setfam [family]\nFamilies: {families_list}"
-    family = " ".join(args)
-    key = family.lower()
-    match = FAMILY_ALIASES.get(key) or next((f for f in VALID_FAMILIES if f.lower() == key), None)
-    if not match:
-        families_list = ", ".join(VALID_FAMILIES)
-        return f"❌ '{family}' is not a valid family.\nChoose from: {families_list}"
-    ws = get_ws(sh, "members")
-    existing = find_member_by_name(ws, sender_name)
-    if existing:
-        idx, _ = existing
-        ws.update_cell(idx, 3, match)
-    else:
-        ws.append_row([sender_name, sender_id, match])
-    return f"✅ {sender_name} joined {match}!"
-
-
-
-    """Admin manual point adjustment: addpoints [family] [+/-N]"""
+def cmd_addpoints(sh, args, is_admin):
     if not is_admin:
         return "❌ Admin only."
     if len(args) < 2:
-        return "Usage: @bot addpoints [family] [number]\nExample: @bot addpoints TeamAlpha 2"
+        return "Usage: /addpoints [family] [number]"
     try:
         delta = int(args[-1])
     except ValueError:
@@ -281,23 +268,24 @@ def cmd_setfam(sh, args, sender_name, sender_id):
     result = get_family_row(ws_points, family)
     if result:
         idx, pts = result
-        new_pts = max(0, pts + delta)
-        ws_points.update_cell(idx, 2, new_pts)
+        ws_points.update_cell(idx, 2, max(0, pts + delta))
     else:
         ws_points.append_row([family, max(0, delta)])
     sign = "+" if delta >= 0 else ""
     return f"✅ {family}: {sign}{delta} points applied."
 
 
-HELP_TEXT = """🏅 Olympics Bot Help
+HELP_TEXT = """🏅 Olympics Bot
 
 📸 Submit a photo:
   /submit (with image attached)
 
-📊 Commands (anyone):
+👤 Join a family:
+  /setfam [LF | B | V | TD | RT]
+
+📊 Anyone:
   /scores
   /families
-  /setfam [family]
   /dispute [name]
 
 🔒 Admin only:
@@ -308,24 +296,22 @@ HELP_TEXT = """🏅 Olympics Bot Help
   /addpoints [family] [N]"""
 
 
-# ── Debug endpoints ───────────────────────────────────────────────────────────
+# ── Debug ─────────────────────────────────────────────────────────────────────
 @app.route("/ping", methods=["GET"])
 def ping():
     return "Bot is running.", 200
 
 
-# ── Webhook entry point ───────────────────────────────────────────────────────
+# ── Webhook ───────────────────────────────────────────────────────────────────
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(silent=True) or {}
 
-    # Log every incoming payload for debugging
     logging.info(f"WEBHOOK RECEIVED: sender={data.get('name')} "
                  f"type={data.get('sender_type')} "
                  f"text={repr(data.get('text'))} "
                  f"attachments={data.get('attachments')}")
 
-    # Ignore bot messages to prevent infinite loops
     if data.get("sender_type") == "bot":
         return jsonify({}), 200
 
@@ -334,12 +320,11 @@ def webhook():
     sender_id   = str(data.get("user_id", ""))
     attachments = data.get("attachments", [])
 
-    bot_tag   = f"@{cfg('BOT_NAME', 'OlympicsBot')}".lower()
     has_image = any(a.get("type") == "image" for a in attachments)
     image_url = next((a["url"] for a in attachments if a.get("type") == "image"), "")
+    bot_tag   = f"@{cfg('BOT_NAME', 'OlympicsBot')}".lower()
 
-    # Respond to /command prefix OR @BotName
-    is_slash = text.startswith("/")
+    is_slash  = text.startswith("/")
     is_tagged = bot_tag in text.lower()
 
     if not is_slash and not is_tagged:
@@ -350,9 +335,9 @@ def webhook():
     if is_slash:
         tokens = text[1:].split()
     else:
-        lower = text.lower()
+        lower     = text.lower()
         after_tag = text[lower.index(bot_tag) + len(bot_tag):].strip()
-        tokens = after_tag.split()
+        tokens    = after_tag.split()
 
     cmd  = tokens[0].lower() if tokens else ""
     args = tokens[1:]
@@ -376,7 +361,7 @@ def webhook():
         if not member:
             send_message(
                 f"❌ {sender_name}, you're not on the roster yet.\n"
-                f"Admin: use '@OlympicsBot assign {sender_name} [FamilyName]'"
+                f"Use /setfam [LF|B|V|TD|RT] to join a family first."
             )
             return jsonify({}), 200
 
@@ -393,6 +378,8 @@ def webhook():
         send_message(cmd_scores(sh))
     elif cmd == "families":
         send_message(cmd_families(sh))
+    elif cmd == "setfam":
+        send_message(cmd_setfam(sh, args, sender_name, sender_id))
     elif cmd == "assign":
         send_message(cmd_assign(sh, args, is_admin))
     elif cmd == "unassign":
@@ -403,8 +390,6 @@ def webhook():
         send_message(cmd_approve(sh, args, is_admin))
     elif cmd == "reject":
         send_message(cmd_reject(sh, args, is_admin))
-    elif cmd == "setfam":
-        send_message(cmd_setfam(sh, args, sender_name, sender_id))
     elif cmd == "addpoints":
         send_message(cmd_addpoints(sh, args, is_admin))
     else:
